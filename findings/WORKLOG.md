@@ -102,6 +102,7 @@ Running notes: what was tried, what worked, dead ends. Newest entries at the bot
 - IMPORTANT hook caveat found: Play_internal (0x7E500) INLINES Stop_internal (no call to
   0x7E810) -> a Stop_internal hook misses re-Play transitions; release shadow buffer in
   the Play_internal wrapper instead.
+- [SUPERSEDED in Session 7: non-looping zero-volume sounds are killed after ONE mix block, not "on schedule"; see 05 §2.2 and 07 §7.2. Original entry kept as history.]
 - S2 ANSWER: MixSound (static @ RVA 0x7AF80, called from MixSounds 0x79D70 per-object gate
   PLAY&PREPARE&!PAUSED&!NONGAME-paused) has the 1.10 zero-volume skip path byte-for-byte:
   all four vols <0.001 -> advance so_fLeft/RightOffset by one mix block, wrap if loop,
@@ -171,7 +172,7 @@ Running notes: what was tried, what worked, dead ends. Newest entries at the bot
 
 ## Session 6 — Phase 2, Task 0 (API submodule)
 
-- API repo confirmed populated at project root `PROJECT_ROOT\API`
+- API repo confirmed populated at project root `E:\OpenCode\SeriousSamEngine\API`
   (SamClassicPatch/API, main @ 8362c52). Note: the registered submodule dir
   `SuperProject\API` is still EMPTY — must be populated for building (`Core.h:24`
   resolves `<API/include/classicspatch_api.h>` against SolutionDir).
