@@ -96,6 +96,14 @@ SuperProject/XGizmo code. Those stay in the private analysis workspace:
 | [Serious Engine 1.10](https://github.com/Croteam-official/Serious-Engine) source | GPL reference for the classic sound code |
 | [SamClassicPatch/API](https://github.com/SamClassicPatch/API), [SuperProject](https://github.com/SamClassicPatch/SuperProject), [XGizmo](https://github.com/SamClassicPatch/XGizmo) | Patch framework under study / extension target |
 
+## Methodology and AI assistance
+
+This is my first reverse-engineering project, and AI tools played a central role throughout the investigation — assisting with disassembly analysis, interpreting engine behavior, comparing the beta and Steam builds, developing hypotheses, and exploring the implementation architecture.
+
+Because AI-assisted analysis can produce confident-sounding but incorrect conclusions, every claim in the findings is tagged by evidence strength (see *Confidence tags* below) and cited to specific disassembly addresses, source lines, or DSOAL log evidence. Early conclusions that were later overturned are marked inline (`[CORRECTED …]` / `[SUPERSEDED …]`) rather than silently edited. Some conclusions remain hypotheses, and the proposed implementation has not yet been validated in-game.
+
+This repository is intended to document the investigation and provide a technical starting point for further verification, discussion, and implementation. Feedback and corrections from experienced reverse engineers and developers are very welcome.
+
 ## Related projects
 
 - [SamClassicPatch](https://github.com/SamClassicPatch) — "Serious Sam
