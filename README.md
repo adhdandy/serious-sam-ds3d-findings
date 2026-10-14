@@ -2,15 +2,13 @@
 
 Reverse-engineering notes and an implementation design for restoring the
 unreleased **TSE 1.50 beta's** per-sound **DirectSound3D** positional audio in
-the Steam builds of *Serious Sam Classics* (TFE/TSE), via runtime function
+the Steam builds of *Serious Sam Classic* (TSE), via runtime function
 patches in [SuperProject](https://github.com/SamClassicPatch) — without
 replacing the stock `Engine.dll`.
 
 An opt-in cvar (`snd_bDS3DSpatial`, default off) will enable a “shadow buffer”
-mode: each playing mono 3D sound gets its own DS3D buffer driven by the same
-math the beta used, while the engine's software mix for that sound is muted.
-The engine stays authoritative for play/finish state; vanilla behavior is
-unchanged when the mode is off.
+mode: each playing mono 3D sound gets its own DS3D buffer driven by the same math the beta used, while a hook on the software mixer ensures that sound is not also mixed in software.
+The DS shadow buffer owns playback state (the beta's model); the engine's SOF_PLAY bit is cleared by the mode when the shadow reports a natural stop.
 
 ## Reading order
 
