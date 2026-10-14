@@ -52,7 +52,7 @@ SuperProject/XGizmo code. Those stay in the private analysis workspace:
 |---|---|
 | TSE 1.50 beta `Engine.dll` | Subject of the beta RE (task group A) |
 | Steam TSE 1.07 `Engine.dll` | Subject of the hook-surface analysis (task group B) |
-| DSOAL call logs (beta + Steam) | Ground truth for what the engines call |
+| DSOAL call logs (beta + Steam) | Ground truth for DS3D call sequences issued by each engine |
 | [Serious Engine 1.10](https://github.com/Croteam-official/Serious-Engine) source | GPL reference for the classic sound code |
 | [SamClassicPatch/API](https://github.com/SamClassicPatch/API), SuperProject, XGizmo | Patch framework under study / extension target |
 
