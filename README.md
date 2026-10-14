@@ -14,23 +14,25 @@ The DS shadow buffer owns playback state (the beta's model); the engine's SOF_PL
 
 | File | What it is |
 |---|---|
+| File | What it is |
+|---|---|
 | [AGENTS.md](AGENTS.md) | Project brief: goals, constraints, tooling, Stage-1 tasks |
 | [AGENTS-phase2-addendum.md](AGENTS-phase2-addendum.md) | Phase 2: implementation plan, gap list (G1–G10), acceptance tests |
-| `findings/00-orientation.md` | Module inventory, export diff, DSOAL log structure, API version |
-| `findings/01-beta-dsound-callsites.md` | All DS3D call sites in the beta engine |
-| `findings/02-beta-position-velocity.md` | How the beta builds `SetPosition` / `SetVelocity` arguments |
-| `findings/03-beta-volume-pitch.md` | Volume (centibel) curve, pitch, Doppler handling |
-| `findings/04-beta-buffer-lifecycle.md` | Buffer creation, flags, pooling, pause/stop/level lifecycle |
-| `findings/05-steam-hook-surface.md` | Steam `Engine.dll` hook surface; mixer behavior with muted objects |
-| `findings/06-core-patch-mechanism.md` | SuperProject / XGizmo patch mechanism and existing sound patches |
-| `findings/07-implementation-notes.md` | Implementation-session notes (gap resolutions, deviations) |
-| `findings/08-design.md` | Module design: files, hooks, eligibility, gates, failure policy |
-| `findings/99-summary-and-open-questions.md` | One-page parameter sheet, mapping table, open questions |
-| `findings/WORKLOG.md` | Running analysis log (what worked, dead ends) |
+| [findings/00-orientation.md](findings/00-orientation.md) | Module inventory, export diff, DSOAL log structure, API version |
+| [findings/01-beta-dsound-callsites.md](findings/01-beta-dsound-callsites.md) | All DS3D call sites in the beta engine |
+| [findings/02-beta-position-velocity.md](findings/02-beta-position-velocity.md) | How the beta builds `SetPosition` / `SetVelocity` arguments |
+| [findings/03-beta-volume-pitch.md](findings/03-beta-volume-pitch.md) | Volume (centibel) curve, pitch, Doppler handling |
+| [findings/04-beta-buffer-lifecycle.md](findings/04-beta-buffer-lifecycle.md) | Buffer creation, flags, pooling, pause/stop/level lifecycle |
+| [findings/05-steam-hook-surface.md](findings/05-steam-hook-surface.md) | Steam `Engine.dll` hook surface; mixer behavior with muted objects |
+| [findings/06-core-patch-mechanism.md](findings/06-core-patch-mechanism.md) | SuperProject / XGizmo patch mechanism and existing sound patches |
+| [findings/07-implementation-notes.md](findings/07-implementation-notes.md) | Implementation-session notes (gap resolutions, deviations) |
+| [findings/08-design.md](findings/08-design.md) | Module design: files, hooks, eligibility, gates, failure policy |
+| [findings/99-summary-and-open-questions.md](findings/99-summary-and-open-questions.md) | One-page parameter sheet, mapping table, open questions |
+| [WORKLOG.md](findings/WORKLOG.md) | Running analysis log (what worked, dead ends) |
 
-`findings/scripts/` contains the log-analysis and PE helpers used during the
-research (`logstats.py`, `condense.py`, `exportdiff.py`, `readpe.py`,
-`slicefunc.py`, plus a Ghidra script).
+[`findings/scripts/`](findings/scripts/) contains the log-analysis and PE helpers
+used during the research (`logstats.py`, `condense.py`, `exportdiff.py`,
+`readpe.py`, `slicefunc.py`, plus a Ghidra script).
 
 ## Confidence tags
 
