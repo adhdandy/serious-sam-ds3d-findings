@@ -94,6 +94,7 @@ SuperProject/XGizmo code. Those stay in the private analysis workspace:
 | Steam TSE 1.07 `Engine.dll` | Subject of the hook-surface analysis (task group B) |
 | DSOAL call logs (beta + Steam) | Ground truth for DS3D call sequences issued by each engine |
 | [Serious Engine 1.10](https://github.com/Croteam-official/Serious-Engine) source | GPL reference for the classic sound code |
+| [Last Chaos Client Source](https://github.com/openlastchaos/lastchaos-source-client/) | Shares an Engine with TSE 1.50 |
 | [SamClassicPatch/API](https://github.com/SamClassicPatch/API), [SuperProject](https://github.com/SamClassicPatch/SuperProject), [XGizmo](https://github.com/SamClassicPatch/XGizmo) | Patch framework under study / extension target |
 
 ## Methodology and AI assistance
