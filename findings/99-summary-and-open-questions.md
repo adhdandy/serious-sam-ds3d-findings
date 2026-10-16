@@ -18,9 +18,9 @@ beta Engine.dll disassembly (findings 01–04).
 | 2 | Distance factor `w` | `1` if `dist ≤ hotspot`, else `(falloff−dist)/(falloff−hotspot)`; listener skipped entirely if `dist > falloff` | VERIFIED | 02 §2 |
 | 3 | Position (DS3D args) | `SetPosition(Σ(rotate(worldΔ)·w)/Σw . x, .y, **−.z**, DS3D_DEFERRED)` — multi-listener weighted average of listener-space deltas; **length = true distance, NOT normalized**; if no entity or all listeners out of range: parked `(0,0,10000)` → logs as `(0,0,−10000)` | VERIFIED | 02 §2/§4/§7 |
 | 4 | Velocity (DS3D args) | `SetVelocity(relVelRotated .x, .y, −.z, DS3D_DEFERRED)` where `relVel = entityVel − listenerVel` rotated by listener matrix, same weighting | VERIFIED | 02 §5 |
-| 5 | Volumetric near-field | inside hotspot & (SOF_VOLUMETRIC or decoder): blend rotated direction around listener basis `(0,0,−1)` by hotspot factor → ~unit vectors (the log's 101K `(0,0,1)` = `(0,0,−1)` z-negated) | VERIFIED shape; angle scale const `_DAT_101b8ca8 = 0.0` role unclear → raw disasm if bit-exact needed | 02 §3 |
+| 5 | Volumetric near-field | inside hotspot & (SOF_VOLUMETRIC or decoder): angle = `ACos(dot(normalize(dir), (0,0,−1))) × bias`, `bias = min((dist−hotspot)/(falloff−hotspot)×3, 1)`; bias=0 (inside hotspot) → position `(0,0,−1)`, speed 0; bias ≥ 1 → plain rotated delta; 0<bias<1 → axis-lerp blend toward the `(0,0,−1)` basis → ~unit vectors (the log's 101K `(0,0,1)` = `(0,0,−1)` z-negated) | VERIFIED (LC cross-check; the `_DAT_101b8ca8 = 0.0` "angle scale" was a Ghidra misread — it is the volumetric-bias default) | 02 §3, 07 §14.4 |
 | 6 | Apply mode | `SetPosition`/`SetVelocity`/EAX DirectHF: **DEFERRED (1)**; `SetVolume`/`SetFrequency`: IMMEDIATE (0); `SetMode`: IMMEDIATE; **one `CommitDeferredSettings()` per frame after all sounds** | VERIFIED | 02 §6, 01 §3 |
-| 7 | Buffer mode | `SetMode(DS3DMODE_HEADRELATIVE=1, 0)` for 3D mono sounds; **`DISABLE(2)` for stereo sounds / SOF_2D** (DS3D needs mono) — log 206×1 / 21×2 | VERIFIED | 04 §2/§3 |
+| 7 | Buffer mode | `SetMode(DS3DMODE_HEADRELATIVE=1, 0)` for 3D mono sounds; **`DISABLE(2)` for mono non-3D / `SOF_VOICE` sounds** — `SetMode` is only called inside the mono commit path, **stereo sounds never get `SetMode`** (log 206×1 / 21×2; the 227-vs-228 SetMode/duplicate residual stays open) | VERIFIED (LC + beta 0x1008269d) | 04 §2/§3, 07 §14.1 check 6 |
 
 ### 1.2 Volume / filter / pitch
 
@@ -31,19 +31,19 @@ beta Engine.dll disassembly (findings 01–04).
 | 10 | **Centibel curve** | `v ≤ 0.005 → −10000`; else (`snd_bLinearVolume`=1, default): `cB = ftol(3000×(v(v−1)+(1−v)·log10 v))`; else `cB = ftol(3000×log10 v)` — predicts log's −538/−1436/−2157 exactly | VERIFIED | 03 §2 |
 | 11 | `SetFrequency` | `pitch==1.0 → 0 (DSBFREQUENCY_ORIGINAL)`; else `ftol(data.nSamplesPerSec × pitch)`. NOT doppler. | VERIFIED | 03 §3 |
 | 12 | Doppler | **once**: DS3D only (`SetVelocity` + DopplerFactor 1.1) on the DS3D path; software `c=300 m/s` formula only for waveOut/decoder sounds | VERIFIED | 03 §4 |
-| 13 | EAX per-buffer | if 3D && playing && EAX && `snd_bUseEnvironmentFX`: `DirectHF = clamp(round(−100 × hfFactor), −10000, 0)` via `KsPropertySet::Set(EAX20_Buffer, 0x80000003, …)` (DEFERRED) | VERIFIED | 03 §5 |
+| 13 | EAX per-buffer | if 3D && playing && EAX: `DirectHF = clamp(round(−100 × hfFactor), −10000, 0)` via `KsPropertySet::Set(EAX20_Buffer, 0x80000003, …)` (DEFERRED) — **the `Set` is issued also when `snd_bUseEnvironmentFX == 0`, with value 0** (beta skips only the computation, not the call; our design gates it — cvar-off only, low priority) | VERIFIED | 03 §5, 07 §14.2 |
 | 14 | Buffer flags | mono 3D template: `CTRL3D\|CTRLFREQUENCY\|CTRLVOLUME\|MUTE3DATMAXDISTANCE\|LOCDEFER`; stereo 2D: `CTRLFREQUENCY\|CTRLPAN\|CTRLVOLUME\|LOCDEFER`; `guid3DAlgorithm` from `snd_iEmulationType` (0/1/2 = DEFAULT/HRTF_LIGHT/HRTF_FULL); PCM written once via Lock/Unlock | VERIFIED | 04 §2 |
 
 ### 1.3 Lifecycle / channel management
 
 | # | Event | Behavior | Confidence | Source |
 |---|---|---|---|---|
-| 15 | Voice budget | `snd_iMaxVoices` (default 30, clamp 4–64) channels; **steal lowest-volume channel only if `newVol − lowest > 0.333`**; else uncommitted (silent) this frame (**beta behavior; our design deviates — budget-denied voices fall back to audible software via `bBypass`, 07 §13 item 19 / 08 §4 §6**) | VERIFIED | 04 §3 |
+| 15 | Voice budget | `snd_iMaxVoices` (default 30, clamp 4–64) channels; commit gate = `!held && !silent(<0.005, post-budget so+0x64) && !paused` — **silent sounds never commit and never consume a voice; held + silent > 10 s → non-forced release (orphan plays out)**; steal lowest-volume channel only if `newVol − lowest > 0.333`, else denied this frame; over-voice-budget held buffers are force-released (beta 0x10082aa2-0x10082ad1) (**our design deviates twice: budget-denied voices fall back to audible software via `bBypass`, 07 §13 item 19; and the D8 silence test runs pre-budget, 07 §13 items 21/26**) | VERIFIED | 04 §3, 07 §14.1 check 2 |
 | 16 | Buffer instantiation | `DuplicateSoundBuffer(template)` per (re)commit + `QI(3DBuffer)` (+ `QI(KsPropertySet)` if 3D&EAX) + `SetMode` + `SetCurrentPosition(0)` | VERIFIED | 04 §3 |
-| 17 | Stop/finish | `Stop` clears PLAY + releases channel (non-forced: owner cleared only; **orphaned buffer plays out**); finished non-looping → `Stop()` + object stop | VERIFIED | 04 §3/§4 |
-| 18 | Pause | **releases buffer immediately** (`ReleasePlayingBuffer(force)`); Resume → recommitted next frame (timers preserved → offset via elapsed time) | VERIFIED | 04 §5 |
+| 17 | Stop/finish | `Stop` clears PLAY + releases channel (non-forced: owner cleared only; **orphaned buffer plays out**); finish rule (verified): `!playing && !pauseGated && !loop && (!SOF_WAITING(0x10000000) \|\| elapsed > sd_tmLength)` → `Stop(1)`, else `Play(0,0,loop?)`; `SOF_WAITING` cleared after both, set at commit and at pause-stop | VERIFIED | 04 §3/§4, 07 §14.1 check 2 |
+| 18 | Pause | **releases buffer immediately** (`ReleasePlayingBuffer(force)`); Resume → recommitted next frame — **always at `SetCurrentPosition(0)`**: the recommit's offset computation is dead in the beta (constant 0 at 0x10082BFB; the `GetElapsedTime(0)` result is discarded — LC has the same shadowed-local bug, 07 §14.3 item 1); timers are preserved for the finish rule only. Our synced-offset recommit is an improvement, not parity | VERIFIED | 04 §5, 07 §14.1 check 3 |
 | 19 | Format/level change, focus loss | `SetFormat`: Pause-all → ClearBuffer-all → re-init DS → Reload → Resume | VERIFIED | 04 §1 |
-| 20 | Game pause (network) | `SetVolume(−10000)` + `SetFrequency(0)` + `Stop()` per channel (not SOF_NONGAME) | VERIFIED | 04 §4 |
+| 20 | Game pause (network) | per channel (not SOF_NONGAME): **no `SetVolume(−10000)`/`SetFrequency(0)` — the volume/frequency sets are skipped on gated frames entirely**; a playing buffer gets `SOF_WAITING` + `Stop()` only; sets resume on the first ungated frame before the re-`Play` (corrected 2026-10-16 — the old "mute path" was a misreading; the log's −10000 comes from the 0.005 silence gate) | VERIFIED | 04 §4, 07 §14.1 check 1 |
 | 21 | Beta software mixer | In DS3D mode mixes **decoder sounds only** → no double audio | VERIFIED | 04 §6 |
 
 ---
@@ -95,8 +95,8 @@ beta Engine.dll disassembly (findings 01–04).
 
 | # | Unknown | Risk | Suggested resolution |
 |---|---|---|---|
-| 1 | Exact beta stereo-pair behavior of the **volumetric blend angle constants** (`_DAT_101b8ca8 = 0.0` multiply in the acos path) — matters only if near-field volumetric direction must be *bit-identical* to the beta | low-med (audible only for SOF_VOLUMETRIC sounds inside hotspot; log can't validate direction beyond the (0,0,±1) population) | raw-disasm the acos block at 0x87970–0x886B0 (scratch/beta-engine-disasm.txt already has it); decide constant role; if still ambiguous, ship the plain `w`-weighted direction (log-indistinguishable except for exact-at-listener case = (0,0,−1) basis, which IS verified) |
-| 2 | Beta `Fade()`/crossfade semantics + menu-state volume factors (`DAT_1022e9d8/DAT_1022e9d4`) — whether the DS3D mode should reproduce crossfades or keep 1.10's smooth-transition mixer | low (cosmetic; Steam `SetVolume`-based mute path replaces it) | decompile `Fade` (0x87530) + `Update` head; likely skip: not needed for parity of positional behavior |
+| 1 | ~~Exact beta stereo-pair behavior of the **volumetric blend angle constants**~~ **RESOLVED (2026-10-16, LC cross-check — 07 §14.4)**: angle = `ACos(dot(dir,(0,0,−1))) × bias` with `bias = min((dist−hotspot)/(falloff−hotspot)×3, 1)`; bias=0 → `(0,0,−1)` + zero speed; bias ≥ 1 → plain rotated delta. `_DAT_101b8ca8 = 0.0` was a Ghidra misread (it is the volumetric-bias default). Sheet row #5 → VERIFIED. | ~~low-med~~ none | none — recorded |
+| 2 | ~~Beta `Fade()`/crossfade semantics + menu-state volume factors~~ **RESOLVED (2026-10-16, LC cross-check — 07 §14.4)**: `Fade` lerps volume toward the fade target over the fade time; a fade completing at target 0 stops the sound. The menu-state factors `DAT_1022e9d8/d4` are `_bMuteVolume` (→ 0) and `_bAttenuateVolume` (→ 0.5 except `SOF_VOICE`; set when a voice sound > 0.2 is pending) — Steam has neither, N/A. Decision unchanged: not reproduced (no Steam Fade API). | ~~low~~ none | none — recorded |
 | 3 | DSOAL behavior of `MUTE3DATMAXDISTANCE` + rolloff 0 + parked `SetPosition(0,0,−10000)` on **non-DSOAL** stacks (real Creative/Windows dsound, OpenAL Soft w/o wrapper) — parked buffers might still be faintly audible if a driver ignores flags | med for correctness on non-DSOAL hardware | runtime test (needs user approval to run the game with a test build); mitigation: also `SetVolume(−10000)` when parked (beta does exactly this — log shows parked = position(0,0,−10000) **and** volume −10000) — so reproduce both, which the sheet already specifies |
 | 4 | `UpdateSounds`-side EAX listener env presets (`SetEnvironment` 0x81C20 / env table @ 0x1020f7c8) if the mode wants EAX listener parity | low (optional feature) | dump 17-dword table + Steam `SetEnvironment` (RVA 0x781B0, `(long,long,float)` signature differs) if pursued |
 | 5 | Whether `snd_iMaxSameSounds` budget and `Fade` should ship in the Steam mode at all (they're beta features, not DS3D-specific) | low | product decision: recommend including budget (prevents same-sample pileup under HRTF) |
@@ -106,6 +106,14 @@ beta Engine.dll disassembly (findings 01–04).
 ### Explicitly resolved / no longer open
 - `CreatePatch`/`HFuncPatch` signatures + trampoline applicability to the four new hooks +
   `SE1_VER` values `[VERIFIED — Phase 2 Task 0]` — 06 §10.
+- Volumetric blend formula + `Fade()` semantics + menu-state factor identification
+  `[VERIFIED — LC cross-check 2026-10-16]` — 07 §14.4.
+- Beta flag names: 0x40 = `SOF_VOICE`, 0x10000000 = `SOF_WAITING`, 0x40000000 = `SOF_LOADED`
+  (not SOF_2D / "has hw buffer" / SMOOTHCHANGE) `[VERIFIED — LC cross-check]` — 07 §14.3 item 2.
+- Beta recommit offset is always 0 (dead computation in both beta and LC) — our synced
+  release is an improvement, not parity `[VERIFIED]` — 07 §14.3 item 1.
+- Beta pause path: no `SetVolume(−10000)`/`SetFrequency(0)` on gated frames (skip + WAITING +
+  Stop) `[VERIFIED]` — 07 §14.1 check 1.
 - `dwApply=1` = DEFERRED `[VERIFIED]`; CommitDeferredSettings present (46,444×) — 00 §4.1.
 - No `SetAllParameters`, no cone/min/max distance setters — 00 §4.1, 03 §6.
 - Steam mixer zero-volume behavior = S2 answer — 05 §2.

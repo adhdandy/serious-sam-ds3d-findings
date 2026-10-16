@@ -116,8 +116,10 @@ Listener3D::CommitDeferredSettings()
   `QueryInterface(IID_IDirectSound3DBuffer)` (229 total ≈ 228 duplicates + 1 startup probe),
   `SetCurrentPosition(0)` ×228, then `Play` (216× `(0,0,0x0)`, 15× `(0,0,0x1=LOOPING)`),
   `Stop` ×55 `[VERIFIED]`.
-- `SetMode` is called once per duplicate: 206× `HEADRELATIVE(1)` for 3D sounds, 21×
-  `DISABLE(2)`—presumably stereo/2D sounds (DS3D needs mono) `[VERIFIED counts, LIKELY semantics]`.
+- `SetMode` is called once per duplicate — **only inside the mono commit path; stereo
+  duplicates never get `SetMode` at all**: 206× `HEADRELATIVE(1)` for 3D mono sounds,
+  21× `DISABLE(2)` for mono non-3D or `SOF_VOICE` sounds `[VERIFIED counts + semantics
+  (LC cross-check + beta binary 0x1008269d — findings 07 §14.1 check 6)]`.
 - One **stereo software-mix buffer** (35,284 B = 200 ms, `CTRLFREQUENCY|CTRLPAN|CTRLVOLUME|
   GETCURRENTPOSITION2|LOCDEFER`) is also created, played looping, polled
   (`GetCurrentPosition` ×1,391) and re-`Lock`ed—**the 1.10-style software mixer still runs

@@ -143,10 +143,8 @@ strongly — channel-index API — but that's task group A, see findings/01.)
 
 **Question:** if a sound object's left and right volume are zero, does the mixer still
 advance its playback position and report it finished at the correct time, or does it
-skip it entirely? → **It skips mixing but advances the offset by one block. Looping sounds
-keep advancing and wrapping; NON-looping sounds have `SOF_PLAY` cleared after that single
-block (no end-of-buffer check).** `[CORRECTED in Phase 2 Task 1 — see §2.2 and
-findings/07 §7.2; the original answer here, "finishes on schedule", was wrong.]`
+skip it entirely? → **Both: it skips mixing but (for non-encoded sounds) advances the
+offset and finishes on schedule.**
 
 ### 2.1 `MixSounds` (RVA 0x79D70) gate structure `[VERIFIED]`
 

@@ -254,7 +254,7 @@ From 1.10 `SoundData.cpp/h` (= Steam per 05 §1.1 empirical layout):
 | re-play of a playing object | `Play_internal` (inlined `Stop_internal`, 05 §1.3; offsets reset to 0 unless `SOF_LOADED`, SoundObject.cpp:276-281) | release old (orphan semantics, 99 #17), create fresh at `bytes(so_fLeftOffset)` (= 0 unless LOADED); `so_fDelayed` is reset by the original itself (§12.7) |
 | prediction copy | `CSoundObject::Copy` (SoundObject.cpp:121-131) / `operator=` — both call **public `Play`** when the source was playing | goes through `P_Play_internal` → normal create; copy has `so_penEntity=NULL` → parked (02 §1) |
 | savegame load replay | `Read_t` (L666-668) → `Play_t(…|SOF_LOADED)` | create at restored `bytes(so_fLeftOffset)` |
-| resume from `SOF_PAUSED` | `Pause`/`Resume` are bare flag flips (SoundObject.h:120-122); shadow released on pause (99 #18) **via `ReleaseForRecommit` (G4d/§13 item 14 — sync + entry kept + `bBypass` stays true; corrected 2026-10-15: offsets are frozen under 7.4, so a plain release would restart at 0; the beta recomputes from its elapsed timer, 04 §5)** | recreate at `bytes(so_fLeftOffset)` = the synced DS cursor |
+| resume from `SOF_PAUSED` | `Pause`/`Resume` are bare flag flips (SoundObject.h:120-122); shadow released on pause (99 #18) **via `ReleaseForRecommit` (G4d/§13 item 14 — sync + entry kept + `bBypass` stays true; corrected 2026-10-15: offsets are frozen under 7.4, so a plain release would restart at 0; corrected again 2026-10-16: the beta's own recommit always restarts at 0 — its offset computation is dead, 04 §5 / 07 §14.3 item 1 — so our synced offset is an improvement, not parity)** | recreate at `bytes(so_fLeftOffset)` = the synced DS cursor |
 | voice steal (ours) | our budget bookkeeping (99 #15) | victim: `ReleaseForRecommit` + **`bBypass=false`** (audible software fallback, §13 item 19) — software resumes from the steal-time synced offset and keeps advancing; re-commit when budget frees at the then-live `bytes(so_fLeftOffset)` (**improvement over the beta's fresh-at-0 recommit**, 04 §3/§4; corrected 2026-10-15) |
 | un-park | listener back in falloff range | nothing special — position/volume resume; buffer was never released (parked ≠ paused: parked buffers keep playing at −10000, 02 §1/§4) |
 | `SOF_SMOOTHCHANGE` continue | `Play_internal` bContinue (offsets still reset unless LOADED) | same as re-play row |
@@ -270,9 +270,12 @@ exist on this build.
 `so_fLeft/RightOffset`, so they stay at their play-start value (0 for fresh plays).
 The G4c resume/steal rows and the G6 wrapper as drafted re-committed at
 `bytes(so_fLeftOffset)` — i.e. every pause, steal and `SetFormat` would restart the
-sound from 0, while the beta resumes from its own elapsed timer (04 §5
-`GetElapsedTime`). Only the old G9 drop path (now `DropToSoftware`, §13 item 14)
-synced the cursor back.
+sound from 0, while the beta's own recommit also restarts at 0 (04 §5: the recommit
+offset computation is dead in the beta — constant 0 at 0x10082BFB with the
+`GetElapsedTime(0)` result discarded — and in LC, 07 §14.3 item 1). Only the old
+G9 drop path (now `DropToSoftware`, §13 item 14) synced the cursor back. **Our
+synced-offset release is deliberately not beta parity — it is an improvement
+(2026-10-16 correction of the earlier "beta resumes from its elapsed timer" claim).**
 
 **Helper** (game thread, `sl_csSound` held):
 
@@ -800,3 +803,177 @@ primitives, delay counter, guards; Task-3 design final):**
     per-finish `Play` of the old condition. A looping buffer that stops without a
     gate is not re-Played (beta parity — the beta's fresh → Play → GetStatus →
     finished rule has no loop-resurrect either); failures route through G9.
+
+**Amendments 2026-10-16 (LC cross-check + design change D8 — silent sounds are not
+committed; user decision 2026-10-16; evidence and provenance in §14):**
+
+21. **D8 silence test** = stored spatial volume **after `snd_fSoundVolume`,
+    before the same-sounds budget**, `< 0.005` (beta const 0x101b95cc). Deliberate
+    difference from the beta, whose gate reads the **post-budget** current volume
+    (beta 0x10082ad3 reads so+0x64, which `Update` zeroes when over the sound-mass
+    budget; 07 §14.2): following the beta would let budget-silenced sounds fall
+    into the `bBypass=false` software fallback audibly and defeat
+    `snd_iMaxSameSounds`. Deviation flagged to the user (§14.5).
+22. **Not held + silent** → **no commit attempt, no voice slot, no DS calls at
+    all** (beta 0x10082b99-0x10082bc9: commit gate `!bInPlayBuffer && !bIsSilent
+    && !SOF_PAUSED`; a still-uncommitted entry hits the `chan < 0 → next sound`
+    skip before any positioning), and the tail sets `bBypass = false` so the stock
+    mixer owns the entry (software is silent too — out-of-range `so_sp` volumes
+    are ~0; stock already kills parked non-looping sounds after one block, §7.2
+    corollary, and loops keep advancing silently). Accepted side effect: a sound
+    just under 0.005 can be faintly audible (≤ −46 dB, the curve knee)
+    non-spatially in software.
+23. **Silent → audible**: normal commit at the live `bytes(so_fLeftOffset)`
+    (offsets are live — the stock mixer advanced the fallback entry),
+    `bBypass = true` (item 19 mechanism unchanged).
+24. **Held + silent (parked)**: keep the buffer parked (position `(0,0,−10000)`
+    + `SetVolume(−10000)` as today) and run a silent-since timer on the beta's
+    clock (game tick; real time for `SOF_NONGAME` — beta `ResetTimer`/`GetElapsedTime`
+    0x100892f0/0x10089370, LC SoundObject.cpp:821-856 paraphrase). Audible again
+    within 10 s → timer cleared (beta 0x10082b1a-0x10082b21). Silent > 10 s
+    (beta 0x10082b46, const 0x101b95c8 = 10.0) → **`ReleaseForRecommit` +
+    `bBypass = false`**: synced offset, software continues silently, recommit at
+    the live offset when audible again. The beta's release is non-forced (orphan
+    plays out at −10000); ours syncs the cursor instead — same inaudible result,
+    no orphan dependency.
+25. **Silent entries do not count toward `snd_iMaxVoices`** (beta: the voice
+    countdown decrements only on commit — 0x10082be3; silent entries never reach
+    it).
+26. **Budget interaction (deliberate deviation)**: over-same-sounds-budget sounds
+    keep the current 08 behavior — committed, volume 0 at live position, counted
+    as voices. The beta lets the budget zeroing feed the silence gate → no commit
+    / 10 s release; rejected for us because the `bBypass=false` fallback would
+    play them audibly in software (item 21 rationale).
+27. **First-block proof unchanged**: registration sets `bBypass = true`; the
+    first tail after the spatial store sets it false if the sound is silent and
+    uncommitted (item 22).
+28. **`DS3DShadow` gains a silent-since timestamp** (DOUBLE timer value on the
+    item-24 clock; equivalently flag + tick). Acceptance row "Parked sounds"
+    tightened: `(0,0,−10000)` + `SetVolume(−10000)` appear **only while a buffer
+    is held** (≤ 10 s of silence); never-committed sounds produce no DS calls.
+29. *(Not adopted, recorded for completeness — 07 §14.5)*: the beta's own finish
+    backstop is a single compare in `Update()`: non-looping, non-decoder,
+    `elapsed > sd_tmLength + 1 s` → clear `SOF_PLAYING`, ignoring pitch (beta
+    0x10087693-0x100876eb; LC SoundObject.cpp:547-551 paraphrase). `bBypass`
+    (item 19) already closes the same hole with audible fallback; the backstop is
+    the alternative, not the implementation.
+
+---
+
+## 14. LC cross-check (2026-10-16)
+
+**Provenance and rules.** New read-only input: the Last Chaos (LC) client engine
+source, user-trimmed to `lastchaos-source-client\Engine\Sound` (SoundLibrary.cpp/.h,
+SoundObject.cpp/.h, SoundData.cpp/.h, SoundMixer.cpp, SoundDecoder.cpp/.h, eax.h,
+al_functions.h, ov_functions.h). LC is a later game on the 1.50-era engine — a
+**cross-check, not ground truth**; the beta binary wins on any conflict. The LC
+code is **leaked proprietary source** and this project is GPL, so the following
+rules are binding: verification only — no LC code is copied or ported, and **no LC
+snippets are pasted into any findings file**; the citations below are locators
+(`file:lines`) plus behavioral paraphrase only; nothing derived from LC goes into
+the public findings repo (`adhdandy/serious-sam-ds3d-findings`). Every claim below
+was verified against the LC source at the cited locators during this session, and
+each beta-binary check from the handoff was run read-only against
+`scratch/beta-engine-disasm.txt` (function slices: `scratch/lcx-beta-{commitplayingbuffer,playbuffers,update}.txt`).
+
+**Known LC-vs-beta differences (all re-verified this session; beta wins):**
+`snd_iMaxVoices` default 20 (LC SoundLibrary.cpp:73) vs 30 (beta .data 0x1020f80c);
+`snd_iEmulationType` range 0–3 including NO_VIRTUALIZATION=1 (LC SoundData.cpp:567-571)
+vs beta 0/1/2 with out-of-range values remapped to 1 by a write-back at LoadWAV_t
+(0x1007f063) and no NO_VIRTUALIZATION; LC QIs `IID_IDirectSound3DBuffer8`
+(LC SoundLibrary.cpp:1363) vs beta `IID_IDirectSound3DBuffer` (0x100826d3); LC voice
+clamp bounds 5–50 (`SND_MINBUFFERS`/`SND_MAXBUFFERS`, LC SoundLibrary.h:50-51) vs beta
+4–64 (04 §7). None affect the spec (we declare our own cvars with the beta's values).
+
+### 14.1 Beta-binary checks (all six PASS — no disagreement with LC)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | PlayBuffers pause path (0x82CEA–0x82D71) | **No `SetVolume(−10000)`/`SetFrequency(0)`** — when `bShouldPause` (game paused && !SOF_NONGAME, computed 0x10082c5f-0x10082c7f) the volume+frequency sets are skipped entirely (`jne 0x10082d5c` at 0x10082c9a); a playing buffer only gets `SOF_WAITING` set (0x10082d64) + `Stop()` (0x10082d71). The log's −10000 volumes come solely from the 0.005 silence gate (`DSBVOLUME_MIN` preloaded at 0x10082ca3). ⇒ 04 §4's old "mute path" line and 99 #20 corrected. |
+| 2 | Silence gate, 10 s release, WAITING finish rule | Commit gate `!bInPlayBuffer && !bIsSilent && !SOF_PAUSED` (0x10082b99-0x10082bbc) with `bIsSilent = so+0x64 < 0.005` (0x10082ad3-0x10082ae8) — so+0x64 is post-budget, i.e. **the beta tests after the same-sounds budget**. Held+silent > 10.0 s (0x10082b46, const 0x101b95c8 = 10.0) → `ReleasePlayingBuffer(chan, 0)` **non-forced** (orphan plays out) + next sound (0x10082b53-0x10082b6e). Finish rule 0x10082d78-0x10082dcf: `!playing && !pauseGated && !loop && (!SOF_WAITING(0x10000000) \|\| elapsed(0) > so_pCsdLink+0x30 (sd_tmLength))` → `Stop(1)` (0x10082da7), else `Play(0,0,loop?)` (0x10082dc7); `SOF_WAITING` cleared after both (0x10082dcf); set at commit (0x10082722) and at pause-stop (0x10082d64). |
+| 3 | `SetCurrentPosition` at 0x10082BFB | Argument is the **constant 0** (`ebx`, held 0 from 0x10082bea); the `GetElapsedTime(0)` call (0x10082bed) has its result **discarded** (`fstp %st(0)` at 0x10082bf2). Beta recommits always restart at 0 — the same dead computation as LC's shadowed local (§14.3 item 1). |
+| 4 | Update backstop | `!SOF_PAUSED && so_pCsdLink && !decoder(so+0x9C) && !SOF_LOOP && GetElapsedTime(0) > so_pCsdLink+0x30 + 1.0` (const 0x101b8cd0 = 1.0) → clear `SOF_PLAYING` + return (0x10087693-0x100876eb). Ignores pitch. |
+| 5 | `snd_iMaxVoices` / `snd_iEmulationType` | Default **30** (.data 0x1020f80c). `snd_iEmulationType`: 0 → DEFAULT, 2 → GUID@0x101b9398 (HRTF_FULL), anything else → GUID@0x101b93a8 (HRTF_LIGHT) **and 1 is written back to the cvar** (LoadWAV_t 0x1007f063) — range 0/1/2, invalid → 1, no NO_VIRTUALIZATION (LC differs, see header). It is `post:` — SetFormat on change (Init 0x10081b80 compares `_iLastEmulType`; SetFormat snapshots it at 0x10081e92). |
+| 6 | SetMode only on the mono path | The QI(3DBuffer)/QI(KsPropertySet)/`SetMode` block sits inside the `bMono` branch of CommitPlayingBuffer (`movl -0x1c; testl; je 0x1008271f` at 0x1008269d-0x100826a2 skips it for stereo) — **stereo duplicates never get `SetMode`**; the 21 `DISABLE` calls are mono non-3D or `SOF_VOICE` sounds. The 227 vs 228 SetMode/duplicate residual stays open. |
+
+### 14.2 Confirmed by LC (no change to the findings; tag "LC-confirmed" applied where cited)
+
+- Listener init: orientation/position/velocity/rolloff 0.0/doppler 1.1, all IMMEDIATE
+  (LC SoundLibrary.cpp:491-499) — 04 §1, 99 #1.
+- z-negated DEFERRED `SetPosition`/`SetVelocity` (LC SoundLibrary.cpp:1571-1577) — 02 §5, 99 #3/#4.
+- One `CommitDeferredSettings` immediately after `PlayBuffers` in `UpdateSounds`
+  (LC SoundLibrary.cpp:1143-1149) — 02 §6, 99 #6.
+- Volume curve: 0.005 gate; linear branch 3000×(v(v−1)+(1−v)log10 v); log branch
+  3000×log10 (LC SoundLibrary.cpp:1586-1606) — 03 §2, 99 #10.
+- `SetFrequency` = rate × pitch or 0 (LC SoundLibrary.cpp:1603-1606) — 03 §3, 99 #11.
+- Steal rule: commit denied unless `new − lowest ≥ 0.333` (LC SoundLibrary.cpp:1326-1340;
+  beta 0x10082620-0x10082638, polarity re-verified) — 04 §3, 99 #15.
+- Duplicate → QI(3D) → (QI(KS) if 3D&&EAX) → `SetMode` → `SetCurrentPosition`
+  (LC SoundLibrary.cpp:1346-1373 + 1557-1569) — 04 §3, 99 #16.
+- Decoder sounds skipped by `PlayBuffers` (LC SoundLibrary.cpp:1495) — 04 §6.
+- Pending list sorted by current volume desc, then distance (LC SoundLibrary.cpp:1018-1042) — 04 §4.
+- EAX DirectHF = clamp(round(−100 × filter), −10000, 0), DEFERRED — and the `Set`
+  is issued **also when `snd_bUseEnvironmentFX == 0`** (value 0; LC SoundLibrary.cpp:1636-1643;
+  beta 0x10082def `je 0x10082e2a` skips only the computation, the `Set` at 0x10082e44 is
+  unconditional) — 03 §5, 99 #13.
+- Software doppler c = 300 only on the non-DS3D/decoder path (LC SoundObject.cpp:439-450:
+  the function returns above the doppler block when DS3D && !decoder) — 03 §4, 99 #12.
+- Volume weight w²: spatial volume accumulates `so_vol × sli_vol × w²` (position and
+  velocity use w¹) (LC SoundObject.cpp:415-425) — 02 §2, 99 #8.
+- `sd_fSoundMass` reset per `UpdateSounds` (pre-pass over the pending list), accumulating
+  the master-scaled volume in list order; over budget → volume 0 for that object
+  (LC SoundLibrary.cpp:1098-1105 + SoundObject.cpp:605-615) — 03 §1, 99 #9.
+
+### 14.3 Corrections applied (each verified in LC and, where listed, in the beta binary)
+
+1. **Beta recommit offset**: LC computes a resume offset from the play timer but
+   redeclares the local inside its `if`, so the outer 0 is always passed to
+   `SetCurrentPosition` (LC SoundLibrary.cpp:1557-1569); the beta binary behaves the
+   same — the timer call is made and its result discarded (§14.1 check 3). Matches the
+   log (228 × `0`). **Beta recommits always restart at 0; our synced-offset release is
+   an improvement, not parity.** Applied: 07 §G4c/G4d, 99 #18, 04 §5.
+2. **Flag names** (beta bit values with LC's names, LC SoundObject.h:14-25):
+   **0x40 = `SOF_VOICE`** (attenuate other sounds; excludes the sound from 3D mode),
+   not "SOF_2D"; **0x10000000 = `SOF_WAITING`** ("paused automatically by engine" —
+   set at commit and at pause-stop, consumed by the finish rule), not "has hw buffer";
+   **0x40000000 = `SOF_LOADED`** ("sound just loaded"), not SMOOTHCHANGE; 0x20000000 =
+   SOF_PAUSED (manual); mask 0x58 = `SOF_LOCAL|SOF_MUSIC|SOF_VOICE`. Steam 1.10 has no
+   voice flag — nothing to map. Applied: 01 §4, 02 §2, 03 §5, 04 §3.
+3. **SetMode only inside the mono path** (§14.1 check 6). Applied: 04 §2/§3, 99 #7,
+   00 §4.4.
+4. **Pause path**: no `SetVolume(−10000)`/`SetFrequency(0)` — the sets are skipped;
+   WAITING + Stop only (§14.1 check 1). Applied: 04 §4, 99 #20, 08 §4 step 6
+   (acceptance-log-order only).
+5. **DirectHF `Set` with value 0 when the cvar is off** (§14.2, EAX bullet). Applied:
+   03 §5, 99 #13 (cvar-off only, low priority — our gate skips it).
+6. **Master volume factors**: music = `snd_fMusicVolume / 2`; `_bMuteVolume` → 0;
+   `_bAttenuateVolume` → 0.5 except `SOF_VOICE` sounds (set by `UpdateSounds` when a
+   `SOF_VOICE` sound with current volume > 0.2 is pending — LC SoundLibrary.cpp:1098-1102).
+   The "menu-state factors" `DAT_1022e9d8/DAT_1022e9d4` are exactly these two (beta
+   Update head 0x100875e6-0x1008761a: mute → 0.0, attenuate && !SOF_VOICE → 0.5, const
+   0x101b8c68). Steam has neither → N/A for the mode. Applied: 03 §1.
+
+### 14.4 Closed unknowns (99 §4 #1/#2)
+
+- **#1 volumetric blend**: angle = `ACos(dot(normalize(dir), (0,0,−1))) × bias`;
+  `bias = min((dist − hotspot)/(falloff − hotspot) × 3, 1)`; bias = 0 (inside hotspot)
+  → position `(0,0,−1)`, speed 0; 0 < bias < 1 → axis-lerp construction around the
+  (0,0,−1) basis; bias ≥ 1 → plain rotated delta (LC SoundObject.cpp:384-412
+  paraphrase). The `_DAT_101b8ca8 = 0.0` "angle scale" was a **Ghidra misread** (it is
+  the volumetric-bias default 0.0, not a multiply in the acos path). Applied: 02 §3,
+  99 sheet row #5 → VERIFIED.
+- **#2 `Fade()`**: volume = lerp(spatialVolume, fadeTarget, t); a fade completing at
+  target 0 stops the sound (clears `SOF_PLAYING`) (LC SoundObject.cpp:553-570, 583
+  paraphrase). Not applicable on Steam (no Fade API) — stays skipped.
+
+### 14.5 Design change D8 — silent sounds are not committed (user decision 2026-10-16)
+
+Reason recorded before the 08 edit (addendum §1 deviation rule): 08 §4/§6 as drafted
+commit every eligible playing sound and never release parked ones, which would let
+out-of-range ambients exhaust `snd_iMaxVoices` and push audible sounds into the
+software fallback; the beta's own behavior (LC SoundLibrary.cpp:1514-1532 + §14.1
+check 2) keeps silent sounds out of the channel system entirely. Spec: §13 items
+21-28 above; 08 §0 (D8 row) / §4 (steps 2-3, closing paragraph) / §6 / §8 / §10 /
+§11 step 5 amended. Deliberate deviation: the silence test runs **before** the
+same-sounds budget (items 21/26) — flagged to the user with this entry. The beta's
+own finish backstop was considered and not adopted (item 29; alternative only).

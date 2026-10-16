@@ -16,6 +16,7 @@ are listed first** (per the addendum §1 deviation rule — reasons are in 07).
 | D5 | Driver runs per-object inside `P_Update3DEffects`, engine list order | `P_Update3DEffects` is **store-only**; the DS driver runs in the `P_UpdateSounds` tail over the **volume-sorted** table (beta `PlayBuffers` structure; enables the beta's per-frame sort for voice stealing) | 04 §3/§4; user-approved 2026-10-14, 07 §13 item 7 |
 | D6 | Finish = not-playing + play-cursor-at-end (cursor-based) | `bStarted`-based pure beta finish rule; failures = HRESULT / BUFFERLOST / TERMINATED only; G9 rule 4 deleted | user-approved 2026-10-14, 07 §G9 item 4 |
 | D7 | Voice-budget overflow = "uncommitted, silent this frame" (99 #15, addendum §4 sketch defers to it) | Budget-denied voices fall back to **audible software** via the `bBypass` flag (§4 step 2, §6) | Finish-authority hole: a never-committed entry is mixer-bypassed so nothing clears its `SOF_PLAY` (silent zombie, `IsPlaying()` true); beta silence would require virtual advancement — reimplementing the stock skip path — rejected; 07 §13 item 19 |
+| D8 | (implicit) every eligible playing sound is committed; parked buffers never released | **Silent sounds are not committed**: pre-budget spatial volume < 0.005 and no buffer → no commit attempt, no voice slot, no DS calls (`bBypass=false`, software-silent fallback); held + silent > 10 s → `ReleaseForRecommit` + `bBypass=false`; silent → audible → normal commit at the live offset | Without it, out-of-range ambients exhaust `snd_iMaxVoices` and push audible sounds into software fallback; beta PlayBuffers 0x10082b99-0x10082b6e (silence gate + 10 s non-forced release, verified 2026-10-16); user decision 2026-10-16 — 07 §14.5 / §13 items 21-28 |
 
 ## 1. Files and build gating
 
@@ -81,34 +82,62 @@ sound (matches the beta's per-frame call sequence for the acceptance log):
    sync into `so_fLeft/RightOffset` + past-delay sentinel, entry kept, `bBypass`
    stays true); skip (recommit on resume at
    `SetCurrentPosition(bytes(so_fLeftOffset))` = the synced offset — 99 #18).
-2. **ensure committed** (after the `!SOF_PLAY` validation and the format refresh: read
-   `pso->so_pCsdLink` → refresh `psdKey` + `iRate`/`iChannels`/`iBytesPerFrame` — never
-   dereference `psdKey`; 07 §13 item 17): no buffer → voice budget + steal check
-   (commit only if `newVol − lowestLiveVol > 0.333`, 99 #15):
+2. **silence gate (D8, 07 §13 items 21-25)**: `silent = storedVol ×
+   snd_fSoundVolume < 0.005` — the test runs **after** the master, **before** the
+   same-sounds budget (deliberate deviation from the beta's post-budget gate, 07
+   §14.5; the stored `vol` of step 3 is pre-master/pre-budget, the master is applied
+   here for the test only). **No buffer && silent** → no commit attempt, no voice
+   slot, **no DS calls at all** (beta 0x10082b99-0x10082bc9), `bBypass = false`
+   (stock mixer owns the entry; software is silent too — out-of-range `so_sp`
+   volumes are ~0; accepted ≤ −46 dB edge, 07 §13 item 22). **Buffer held &&
+   silent** → keep parked (steps 4-9 as-is: sentinel position + `SetVolume(−10000)`,
+   buffer keeps playing) + run the silent-since timer (game tick, real time for
+   `SOF_NONGAME`): audible again within 10 s → timer cleared; silent > 10 s →
+   `ReleaseForRecommit` + `bBypass = false` (synced offset, software continues
+   silently, recommit at the live offset once audible — beta 0x10082b46, const
+   10.0). **Silent entries never count toward `snd_iMaxVoices`** (beta parity:
+   the countdown decrements only on commit).
+3. **ensure committed** (only when not silent per step 2, after the `!SOF_PLAY`
+   validation and the format refresh: read `pso->so_pCsdLink` → refresh `psdKey` +
+   `iRate`/`iChannels`/`iBytesPerFrame` — never dereference `psdKey`; 07 §13 item 17):
+   no buffer → voice budget + steal check (commit only if
+   `newVol − lowestLiveVol > 0.333`, 99 #15):
    `DuplicateSoundBuffer(template)` → `QI(3DBuffer)` → (`QI(KsPropertySet)` if EAX) →
    `SetMode(1 /*HEADRELATIVE*/, 0)` → `SetCurrentPosition(bytes(so_fLeftOffset))`
    (= 0 fresh; synced on resume/reload-recommit; **live** mixer-advanced for fallback
-   recommits). Commit failure → `DropToSoftware` (§6). **Over voice budget (or steal
-   victim) → `bBypass = false`**: audible software fallback this frame, retried every
-   tail, back to `bBypass=true` at the live offset on success (07 §13 item 19 —
-   deviation from 99 #15 silence); over **same-sounds** budget → committed but volume
-   0 at live position (99 #9, beta parity). Steal victims: `ReleaseForRecommit` +
-   `bBypass=false` — sync first, software continues from the synced offset, recommit
-   later at the live offset (improvement over the beta's fresh-at-0 recommit, 07 §G4d).
-3. *(spatial values already computed and **stored** per object by `P_Update3DEffects` — beta formulas, own listener loop reusing the `[Cecil]` gate, 07 §G10c):*
-   `w`, `pos = Σ(rotateΔ·w)/Σw`, `vel`, `vol = clamp01(Σ(sli_vol·sp3_max·w²)/Σw)`,
-   `hf = Σ(listenerFilterInt·w)/Σw`; parked case (no entity or no listener in falloff):
-   `pos=(0,0,+10000)` sentinel, `vol=0` (02 §1/§4). The store also sets
-   `bSpatialValid = TRUE` (step 7 gate — 07 §13 item 18); stored fields initialize
-   to parked (pos (0,0,+10000), vol 0, vel 0, hf 0) as the backstop.
+   and silent→audible recommits — 07 §13 item 23). Commit failure → `DropToSoftware`
+   (§6). **Over voice budget (or steal victim) → `bBypass = false`**: audible
+   software fallback this frame, retried every tail, back to `bBypass=true` at the
+   live offset on success (07 §13 item 19 — deviation from 99 #15 silence); over
+   **same-sounds** budget → committed but volume 0 at live position (99 #9, beta
+   parity; deliberately **not** routed through the silence gate — 07 §13 item 26).
+   Steal victims: `ReleaseForRecommit` + `bBypass=false` — sync first, software
+   continues from the synced offset, recommit later at the live offset
+   (improvement over the beta's fresh-at-0 recommit, 07 §G4d).
+
+   *(Not a step — spatial values are already computed and **stored** per object by
+   `P_Update3DEffects` — beta formulas, own listener loop reusing the `[Cecil]` gate,
+   07 §G10c):* `w`, `pos = Σ(rotateΔ·w)/Σw`, `vel`, `vol = clamp01(Σ(sli_vol·sp3_max·w²)/Σw)`
+   (**pre-master, pre-budget** — the D8 step-2 test and the step-6 curve consume it
+   from there), `hf = Σ(listenerFilterInt·w)/Σw`; parked case (no entity or no
+   listener in falloff): `pos=(0,0,+10000)` sentinel, `vol=0` (02 §1/§4). The store
+   also sets `bSpatialValid = TRUE` (step 7 gate — 07 §13 item 18); stored fields
+   initialize to parked (pos (0,0,+10000), vol 0, vel 0, hf 0) as the backstop.
 4. `SetPosition(pos.x, pos.y, −pos.z, DS3D_DEFERRED)` — parked logs as (0,0,−10000);
    `SetVelocity(vel.x, vel.y, −vel.z, DS3D_DEFERRED)` (99 #3/#4, z-negation 02 §5).
 5. `GetStatus` (buffer exists).
-6. **Pause/mute gates**: `(gamePaused && !SOF_NONGAME) || muteWindow` →
-   `SetVolume(-10000); SetFrequency(0); Stop()` **and set `bGateStopped`**
-   (step 7 re-Play condition — 07 §13 item 20; buffer kept; resume from DS
-   position — 99 #20); else `SetVolume(cB, 0)` with `cB` from 99 #10 linear curve on
-   `vol × snd_fSoundVolume` (07 §G10b/c) and `SetFrequency(rate×pitch or 0, 0)` (99 #11; rate = the shadow-cached `iRate`, never `psdKey` — 07 §13 item 12).
+6. **Pause/mute gates**: `(gamePaused && !SOF_NONGAME) || muteWindow` → `Stop()`
+   **and set `bGateStopped`** (step 7 re-Play condition — 07 §13 item 20; buffer
+   kept; resume from DS position — 99 #20). **No `SetVolume(−10000)` /
+   `SetFrequency(0)` on gated frames — corrected 2026-10-16:** the beta skips the
+   volume/frequency sets entirely when pause-gated (07 §14.1 check 1; the old
+   "mute path" was a misreading — the log's −10000 values come from the 0.005
+   silence gate only); volume/frequency resume on the first ungated frame, before
+   step 7's re-`Play` (beta order). `P_Mute`'s one-time `SetVolume(−10000)` at
+   `Mute()`-call time stays (07 §G7 companion). Ungated → `SetVolume(cB, 0)` with
+   `cB` from 99 #10 linear curve on `vol × snd_fSoundVolume` (07 §G10b/c) and
+   `SetFrequency(rate×pitch or 0, 0)` (99 #11; rate = the shadow-cached `iRate`,
+   never `psdKey` — 07 §13 item 12).
 7. buffer && `!playing` && `!gated` && `!delayPending` && **`bSpatialValid`** &&
    (`!bStarted` || **`bGateStopped`**) → `Play(0,0, SOF_LOOP?DSBPLAY_LOOPING:0)`:
    sets `bStarted`, clears `bGateStopped` (07 §13 items 18/20 — removes the spurious
@@ -128,11 +157,18 @@ sound (matches the beta's per-frame call sequence for the acceptance log):
    `KsPropertySet::Set(EAX20_Buffer, 0x80000003, clamp(round(−100·hf), −10000, 0), DEFERRED)`
    (99 #13).
 
-Parked sounds keep playing at −10000 (never released — parked ≠ paused; one-shots
-parked mid-play still finish via step 8, beta behavior). Fallback entries
-(`bBypass=false`) have no buffer — steps 4-9 skip them (no DS calls); the stock
-mixer owns them (advance/wrap/finish — 07 §13 item 19), the `!SOF_PLAY` validation
-drops them, and each tail retries their commit (step 2).
+Parked sounds (held + silent, D8 step 2) keep playing at −10000 **only while the
+10 s silent window runs** — after > 10 s silent the buffer is released via
+`ReleaseForRecommit` and the entry falls to software (`bBypass=false`, silent);
+never-committed silent sounds produce **no DS calls at all** (beta 0x10082bc9:
+silent uncommitted entries are skipped before any positioning). Parked ≠ paused
+(paused entries release via step 1); one-shots parked mid-play still finish via
+step 8 while held (beta behavior). Fallback entries (`bBypass=false`) have no
+buffer — steps 4-9 skip them (no DS calls; this includes silent-uncommitted and
+10 s-released entries); the stock mixer owns them (advance/wrap/finish — 07 §13
+item 19), the `!SOF_PLAY` validation drops them, and each tail retries their
+commit (steps 2-3: audible entries re-commit at the live offset, silent ones only
+once audible again).
 
 ## 5. Eligibility (registration-time, `P_Play_internal`)
 
@@ -175,9 +211,12 @@ decoder sounds are never muted, never shadowed: bypassed only via table membersh
   delay), or on the destruction path (data gone). No mixer-rate offset conversion
   across `SetFormat` (stock-parity imprecision accepted — 07 §G4d).
 - **Budget is not failure**: over **same-sounds** budget → committed + volume 0 at
-  live position (beta parity, 99 #9); over **voice** budget → **audible software
-  fallback** (`bBypass=false`, §4 step 2 — deviation from 99 #15 silence, 07 §13
-  item 19), retried each tail, back to spatial at the live offset. Neither is a drop.
+  live position (beta parity, 99 #9; deliberately **not** routed through the D8
+  silence gate — releasing budget-silenced entries to software would defeat
+  `snd_iMaxSameSounds`, 07 §13 items 21/26); over **voice** budget → **audible
+  software fallback** (`bBypass=false`, §4 step 2 — deviation from 99 #15 silence,
+  07 §13 item 19), retried each tail, back to spatial at the live offset. Neither
+  is a drop.
 
 ## 7. Threading (07 §G8 model, verified lock map)
 
@@ -197,10 +236,14 @@ decoder sounds are never muted, never shadowed: bypassed only via table membersh
 ## 8. Data structures (`SoundDS3D.h`)
 
 - `struct DS3DShadow { CSoundObject *psoOwner; CSoundData *psdKey; LPDIRECTSOUNDBUFFER pBuffer;
-  LPDIRECTSOUND3DBUFFER pBuffer3D; LPKSPROPERTYSET pKsProps; BOOL bLooping, bStarted, bDelayPending,
-  bSpatialValid, bBypass, bGateStopped;
-  FLOAT fLastVolume; INDEX iRate, iChannels, iBytesPerFrame; INDEX iFailFrames; … }`
-  — ≤64 live (channel table = the live-shadow list itself; steal scans it).
+   LPDIRECTSOUND3DBUFFER pBuffer3D; LPKSPROPERTYSET pKsProps; BOOL bLooping, bStarted, bDelayPending,
+   bSpatialValid, bBypass, bGateStopped;
+   FLOAT fLastVolume; INDEX iRate, iChannels, iBytesPerFrame; INDEX iFailFrames;
+   DOUBLE tmSilentSince; … }`
+   — ≤64 live (channel table = the live-shadow list itself; steal scans it).
+   `tmSilentSince` = the D8 silent-since timer value on the beta's clock (game
+   tick; real time for `SOF_NONGAME` — 07 §13 item 24; 0/not-set when audible;
+   drives the 10 s release of step 2).
   **`psdKey` is an opaque map key only** — never dereferenced after commit (07 §13
   item 12); if a live pointer is needed, the only source is `pso->so_pCsdLink`
   (valid while `SOF_PLAY`), refreshed at every (re)commit AFTER the `!SOF_PLAY`
@@ -247,12 +290,12 @@ doppler) — verify via acceptance row "Ear pair unchanged".
 | Per-frame order pos→vel→GetStatus→vol→freq→EAX; one commit | `P_UpdateSounds` tail driver (steps 4-9, sorted) + one tail commit |
 | Apply modes 1/1/0/0 | driver steps 4 (deferred), 6 (immediate), 9 (deferred) |
 | Volume curve | 99 #10 linear branch × master (07 §G10) |
-| Parked = (0,0,−10000)+vol −10000 | driver step 3/4/6 (sentinel + curve at vol 0) |
+| Parked = (0,0,−10000)+vol −10000 | driver steps 2/4/6 — **only while a buffer is held** (held + silent, ≤ 10 s, D8); never-committed silent sounds produce **no DS calls**; after > 10 s silent: release + software-silent fallback (07 §13 items 22/24/28) |
 | Decoder/music = no shadow, still software-audible | eligibility (§5) + D1 (nothing poisoned) |
 | Ear pair unchanged | no touch; G5 reasoning; log/listening check |
 | Mode off = structurally stock log | hooks installed but table empty when cvar 0: `P_MixSound` always trampolines, drivers no-op — only the (stock-identical) listener init commits differ |
 
-## 11. Implementation order (Task 3, adjusted for D1-D7)
+## 11. Implementation order (Task 3, adjusted for D1-D8)
 
 1. Cvars + empty subsystem + all hooks installed, mode off → vanilla behavior unchanged
    (acceptance row "Mode off"); WORKLOG entry.
@@ -267,7 +310,12 @@ doppler) — verify via acceptance row "Ear pair unchanged".
    policy, destructor hook. **Runtime test: pause/resume mid-play of a long one-shot
    — a restart from 0 exposes a missing sync (07 §G4d).**
 5. Budget/steal (`snd_iMaxVoices`, `snd_iMaxSameSounds`), **`bBypass` software
-   fallback + per-tail commit retry** (07 §13 item 19), orphan play-out.
+   fallback + per-tail commit retry** (07 §13 item 19), orphan play-out, **D8
+   silence gate + 10 s parked release** (driver step 2, 07 §13 items 21-28).
+   **Runtime test (D8): an out-of-range ambient must not consume a voice** — in
+   the DSOAL log it produces no per-sound DS calls while silent (and its
+   pre-existing held buffer, if any, disappears ~10 s after it goes silent:
+   release in the log, no further calls for it).
 6. `SetFormat`/`snd_iEmulationType` re-init robustness — **recreate: still-playing
    shadows recommit at synced offsets (one silent frame accepted — 07 §13 item 15)**.
    Runtime tests: (a) toggle `snd_iEmulationType` mid-play of a long ambient under

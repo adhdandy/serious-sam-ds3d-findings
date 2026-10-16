@@ -10,7 +10,11 @@ vol_spatial = clamp01( Σ_listeners( L.vol_float × so.curVolume(+0x38) × w² )
 vol_fade    = crossfade(vol_spatial → so.fadeTarget(+0x34)) over so.fadeTime(+0x30)   [Fade()]
 master      = snd_fSoundVolume            (normal sounds)
             | snd_fMusicVolume × 0.5      (SOF_MUSIC 0x10; the 0.5 is const 0x101b8c68)
-            (× menu-state factors from DAT_1022e9d8/DAT_1022e9d4 — see Update head)
+            × menu-state factors: _bMuteVolume (DAT_1022e9d8) → 0; _bAttenuateVolume
+              (DAT_1022e9d4) → 0.5 except SOF_VOICE sounds (set by UpdateSounds when a
+              SOF_VOICE sound with current volume > 0.2 is pending; beta 0x100875e6-0x1008761a)
+              [identified via LC cross-check 2026-10-16 — findings 07 §14.3 item 6;
+              Steam has neither → N/A for the mode]
 volume      = vol_fade × master           # stored at so+0x64
 ```
 
@@ -79,10 +83,14 @@ if (is3D && playing && channel.KsPropertySet && snd_bUseEnvironmentFX /*DAT_1020
                        NULL, 0, &val, 4);
 ```
 `so.hfFilter` = weighted average of listener filter ints (CSoundListener+0x48,
-`[0x12]`), skipped for sounds with flags & 0x58 = **SOF_2D|SOF_LOCAL|SOF_MUSIC**
-(beta flag names, 01 §4; no SURROUND bit in the beta - 1.10 name leftover).
+`[0x12]`), skipped for sounds with flags & 0x58 = **SOF_VOICE|SOF_LOCAL|SOF_MUSIC**
+(corrected 2026-10-16 — 0x40 is `SOF_VOICE`, not "SOF_2D"; findings 07 §14.3 item 2;
+no SURROUND bit in the beta - 1.10 name leftover).
 This exports the engine's per-ear HF filter to EAX on the DS3D path
 (the software mixer instead applies it in the resampler via so+0x74/+0x78 = `ROUND(32767/vol)`).
+**LC/beta nuance (2026-10-16)**: the `Set` is issued **also when `snd_bUseEnvironmentFX == 0`**
+(with value 0 — the beta skips only the computation, not the call, 0x10082def/0x10082e44;
+findings 07 §14.2). Our design gates the call on the cvar (cvar-off only, low priority).
 
 ## 6. Listener-side parameters `[VERIFIED]`
 

@@ -7,14 +7,14 @@ Workspace caveat (important — updated Phase 2 Task 0, 2026-10-13): at Phase 1 
 submodules of `SuperProject` were **empty directories** in this checkout (`Includes` = SE1-ModSDK,
 `API`, `Docs`, `Extras/XGizmo`, mod shell), so `SuperProject\API\include\classicspatch_api.h`
 (included by `Core/Core.h:24`) could not be quoted. **The API repo is now populated** — as a clone
-at the project root `PROJECT_ROOT\API` (`https://github.com/SamClassicPatch/API`,
+at the project root `E:\OpenCode\SeriousSamEngine\API` (`https://github.com/SamClassicPatch/API`,
 branch `main` @ 8362c52, 19 files); all API definitions are now quoted and verified in §10 below.
 Still empty on disk: `SuperProject\API` (the registered submodule location itself — populate with
 `git submodule update --init API` before building, since `Core.h:24` resolves
 `<API/include/classicspatch_api.h>` against `$(SolutionDir)` = SuperProject) and `SuperProject\Includes`
 (SE1-ModSDK, branch `includes`), which holds the `SE1_VER`/`SE1_GAME` numeric definitions (§10.4;
 values pulled from upstream and recorded). XGizmo sources were read from the sibling checkout
-`PROJECT_ROOT\XGizmo` (same repo as the `Extras/XGizmo` submodule per `.gitmodules`).
+`E:\OpenCode\SeriousSamEngine\XGizmo` (same repo as the `Extras/XGizmo` submodule per `.gitmodules`).
 
 ---
 
@@ -22,7 +22,7 @@ values pulled from upstream and recorded). XGizmo sources were read from the sib
 
 ### Sound patches are registered in `ICorePatches::SoundLibrary()`
 
-`PROJECT_ROOT\SuperProject\Core\API\EnginePatches.cpp:391-401`:
+`E:\OpenCode\SeriousSamEngine\SuperProject\Core\API\EnginePatches.cpp:391-401`:
 
 ```cpp
 #include "Patches/SoundLibrary.h"
@@ -187,7 +187,7 @@ where `pLoadControls` is the variable CreatePatch overwrote with the trampoline 
 
 ## 3. Trampoline mechanics — `XGizmo\Patcher\patcher.cpp` / `patcher.h` (`class CPatch`)
 
-[VERIFIED — read from `PROJECT_ROOT\XGizmo\Patcher\patcher.cpp` (same repo as the
+[VERIFIED — read from `E:\OpenCode\SeriousSamEngine\XGizmo\Patcher\patcher.cpp` (same repo as the
 `SuperProject\Extras\XGizmo` submodule per `SuperProject\.gitmodules`)]
 
 ### HookFunction (patcher.cpp:226-314)
@@ -256,7 +256,7 @@ Two mechanisms, both [VERIFIED]:
 
 - Core includes engine headers (`#include <Engine/Engine.h>`, `Core\Core.h:20`) and links against
   the per-version **import library** `Engine.lib` produced from `Engine.def` — the libraries live in
-  `PROJECT_ROOT\SE1-StaticLibrariesForGames\SeriousSam\<TFE105|TSE105|TSE107|...>`
+  `E:\OpenCode\SeriousSamEngine\SE1-StaticLibrariesForGames\SeriousSam\<TFE105|TSE105|TSE107|...>`
   (each folder has `Engine.def`, `Engine.exports.txt`, `Engine.lib`; `TSE150` also exists).
   `Core\Core.h:80` has `#pragma comment(lib, "ClassicsCore.lib")` style linking; engine libs come
   via the `$(SamEngineLibraries)` / `$(SamEngineIncludes)` / `$(SamEnginePreproc)` macros defined in
@@ -424,7 +424,7 @@ route (§4b) works with zero build-system changes.
 
 ## 10. API submodule verified (Phase 2, Task 0 — 2026-10-13)
 
-Source: `PROJECT_ROOT\API` (clone of `https://github.com/SamClassicPatch/API`,
+Source: `E:\OpenCode\SeriousSamEngine\API` (clone of `https://github.com/SamClassicPatch/API`,
 branch `main` @ 8362c52). `[VERIFIED]` = read on disk in that clone. Line numbers refer to files
 under `API\include\`.
 

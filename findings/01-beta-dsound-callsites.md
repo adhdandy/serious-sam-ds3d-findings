@@ -154,9 +154,14 @@ position (floats at [2],[3],[4]), `+0x14..0x34` 3×3 rotation matrix (floats at 
 
 **Flags seen (beta values, differ from 1.10!)**: 0x1=SOF_LOOP, 0x2=SOF_3D, 0x4=SOF_VOLUMETRIC,
 0x8=SOF_LOCAL(listener-entity match), 0x10=SOF_MUSIC(uses snd_fMusicVolume×0.5),
-0x20=SOF_NONGAME(not muted on pause), 0x40=SOF_2D(force non-3D even if mono),
-0x40000000=SOF_SMOOTHCHANGE(keep mixer params on re-Play), 0x10000000=has hw buffer,
-0x20000000=paused, 0x80000000=SOF_PLAY `[VERIFIED bits; names LIKELY]`.
+0x20=SOF_NONGAME(not muted on pause), 0x40=SOF_VOICE("someone's talking" — attenuates other
+sounds and **excludes this sound from 3D mode**), 0x10000000=SOF_WAITING("paused
+automatically by engine" — set at commit AND at the pause-stop, consumed by the PlayBuffers
+finish rule), 0x20000000=SOF_PAUSED(manual pause), 0x40000000=SOF_LOADED("sound just loaded"),
+0x80000000=SOF_PLAY `[VERIFIED bits; names VERIFIED via LC cross-check 2026-10-16
+(SoundObject.h flag block, locator-only citation — findings 07 §14.3 item 2; earlier names
+"SOF_2D" / "has hw buffer" / "SMOOTHCHANGE" were wrong)]`. Mask 0x58 = SOF_LOCAL|SOF_MUSIC|
+SOF_VOICE. Steam 1.10 has no voice flag — nothing to map.
 
 ## 5. Residuals / caveats
 

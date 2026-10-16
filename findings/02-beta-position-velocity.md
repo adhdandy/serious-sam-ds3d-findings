@@ -41,11 +41,10 @@ dist = |Δ|;
 if (dist > so->sp3_fFalloff) continue;      // beyond falloff: no contribution at all (→ parked if all skip)
 
 factor     = 1.0;                          // distance factor
-volFactor  = 0.0;                          // "inside hotspot" factor
+volFactor  = 0.0;                          // "inside hotspot" factor = volumetric bias
 if (dist > so->sp3_fHotSpot) {
-    factor    = (sp3_fFalloff - dist) / (sp3_fFalloff - sp3_fHotSpot);
-    volFactor = (dist - sp3_fHotSpot) / (sp3_fFalloff - sp3_fHotSpot) * 3.0;   // ×3.0 (0x101b9ad4)
-    if (volFactor <= 0.0f) volFactor = 1.0f;    // Ghidra rendering; effectively clamp
+    factor     = (sp3_fFalloff - dist) / (sp3_fFalloff - sp3_fHotSpot);
+    volFactor  = ClampUp( (dist - sp3_fHotSpot) / (sp3_fFalloff - sp3_fHotSpot) * 3.0, 1.0 );   // ×3.0 (0x101b9ad4)
 }
 
 if (!bVolumetric || volFactor >= 1.0) {
@@ -57,7 +56,7 @@ if (!bVolumetric || volFactor >= 1.0) {
 } else {
     // VOLUMETRIC BLEND (inside hotspot): see §3
 }
-listenerVol = (so->flags & 0x58) ? 0.0 : L.filter_int;    // mask 0x58 = 0x08|0x10|0x40 = SOF_LOCAL|SOF_MUSIC|SOF_2D (beta names, see 01 §4; NOTE: the beta has no SURROUND bit - that is a 1.10 flag name; Ghidra sound-analysis.txt:7752)
+listenerVol = (so->flags & 0x58) ? 0.0 : L.filter_int;    // mask 0x58 = 0x08|0x10|0x40 = SOF_LOCAL|SOF_MUSIC|SOF_VOICE (corrected 2026-10-16, findings 07 §14.3 item 2; NOTE: the beta has no SURROUND bit - that is a 1.10 flag name; Ghidra sound-analysis.txt:7752)
 acc.dist    += factor * dist;
 acc.dir     += dirR * factor;                // position accumulation
 acc.vel     += velR * factor;
@@ -73,25 +72,28 @@ After the loop (if `acc.sum > 0.001`): divide all accumulators by `acc.sum`
 **=> position = Σ(rotated Δ × factor)/Σfactor** — for a single listener this is the
 listener-space relative vector with length = actual distance (NOT normalized).
 
-## 3. Volumetric blend (inside hotspot) `[VERIFIED formula shape]`
+## 3. Volumetric blend (inside hotspot) `[VERIFIED — LC cross-check 2026-10-16, findings 07 §14.4]`
 
 When the sound is volumetric and inside the hotspot (`volFactor < 1`):
 ```c
-n = normalize(dirR);
-// constants: basis A=(0,0,0)→ DAT_1022ea5c=0, B=0, C=-1 (DAT_1022ea64) — set once at 0x10086e60, never rewritten
-axis1 = (n.y*C - n.z*B, ...)                 // cross products with the (0,0,-1)-based basis
-axis2 = ...
-t = -(n · A/B/C basis)                        // = n.z for the (0,0,-1) basis
-t = clamp(t, 0.0, 1.0)
-blend the two axes toward 1 by t
-angle = acos(clamped_dot) * π(0x101b8ca8→0) / 2.0?   // 0x101b95e8=π; factor 0x101b8ca8=0.0 (see note)
-dirFinal = basis*cos(angle*volFactor) + axis2*sin(angle*volFactor)
+if (volFactor <= 0) {
+    dirR = (0,0,-1);  velR = (0,0,0);      // "in front", static — the log's 101K (0,0,1) after z-negation
+} else {
+    n = normalize(dirR);                   // rotated delta normalized
+    t = clamp(n.z, 0.0, 1.0)               // dot with the (0,0,-1) basis
+    plane = normalize(n × (0,0,-1));       // axis in the horizontal plane
+    ort2  = (0,0,-1) × plane
+    ort1  = lerp(ort2, (0,1,0), max(-n.z, 0.0))    // downward directions lerp toward +Y
+    angle = ACos(n.z) * volFactor          // bias = volFactor (the ×3 ramp of §2, clamped to 1)
+    dirFinal = (0,0,-1)*cos(angle) + ort1*sin(angle)
+    velR = velR * volFactor                // attenuated speed
+}
 ```
-Exact constant roles: `_DAT_101b8ca8 = 0.0` (decompiled as multiply — likely a leftover;
-the effective angle scale needs raw-disasm confirmation if a bit-exact reproduction is
-required). Effect: **near-field volumetric sounds resolve to ~unit-length directions
-rotated around the listener basis; a sound exactly at the listener resolves to the
-default basis (0,0,-1)**.
+**Resolved (2026-10-16)**: the earlier ambiguity about `_DAT_101b8ca8 = 0.0` ("angle scale
+constant, multiply in the acos path") was a **Ghidra misread** — that constant is the
+volumetric-bias *default* 0.0, not part of the angle computation; there is no extra angle
+scale (07 §14.4). bias = 0 (inside hotspot) → `(0,0,−1)` and zero speed; 0 < bias < 1 →
+the axis-lerp construction above; bias ≥ 1 → the plain rotated delta of §2 (no blend).
 
 ## 4. How this explains the log distribution `[VERIFIED mapping]`
 

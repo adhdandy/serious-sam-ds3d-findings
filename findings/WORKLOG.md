@@ -102,7 +102,6 @@ Running notes: what was tried, what worked, dead ends. Newest entries at the bot
 - IMPORTANT hook caveat found: Play_internal (0x7E500) INLINES Stop_internal (no call to
   0x7E810) -> a Stop_internal hook misses re-Play transitions; release shadow buffer in
   the Play_internal wrapper instead.
-- [SUPERSEDED in Session 7: non-looping zero-volume sounds are killed after ONE mix block, not "on schedule"; see 05 §2.2 and 07 §7.2. Original entry kept as history.]
 - S2 ANSWER: MixSound (static @ RVA 0x7AF80, called from MixSounds 0x79D70 per-object gate
   PLAY&PREPARE&!PAUSED&!NONGAME-paused) has the 1.10 zero-volume skip path byte-for-byte:
   all four vols <0.001 -> advance so_fLeft/RightOffset by one mix block, wrap if loop,
@@ -390,3 +389,86 @@ finish-authority hole were both rejected in favor of a third (bBypass fallback).
   #6 mechanism note), WORKLOG.
 - Next: Task 3 step 1 — cvars + empty shadow subsystem + all hooks installed, mode
   off; verify vanilla behavior unchanged (08 §11 step 1, acceptance row "Mode off").
+
+## Session 11 — 2026-10-16 — LC cross-check + design change D8 (HANDOFF-lastchaos-crosscheck.md)
+
+Documentation/design-amendment session per the handoff; Task 3 still not started; no
+hook, RVA, or threading decision changed.
+
+- **New read-only input**: `lastchaos-source-client\Engine\Sound` — verification-only
+  (leaked proprietary code in a GPL project; locator citations + paraphrase only, no
+  code copied; nothing LC-derived goes to the public repo — provenance rules recorded
+  in 07 §14 header).
+- **Every handoff claim re-verified at the cited LC locators before recording**:
+  SoundLibrary.cpp 478-499 (listener init), 1018-1042 (sort comparator), 1050-1158
+  (UpdateSounds: mass reset, voice clamp, PlayBuffers+one commit), 1290-1382
+  (CommitPlayingBuffer: bSet3D gate incl. 0x40, steal ≥ 0.333, duplicate → QI →
+  SetMode inside the bMono branch, WAITING at commit), 1473-1648 (PlayBuffers: commit
+  gate `!held && !silent(<0.005) && !paused`, 10 s non-forced release, the shadowed
+  `dwPlayPos` local → SetCurrentPosition(0) always, volume curve incl. the
+  snd_bLinearVolume=1 write-back quirk, pause = skip sets + WAITING + Stop, finish
+  rule `!playing && !pauseGated && !loop && (!WAITING || elapsed > length)`, DirectHF
+  Set also when the FX cvar is 0); SoundObject.cpp 323-509 (Update3D incl. volumetric
+  blend, w² volume, filter mask, doppler gated behind the DS3D early-return),
+  513-625 (Update: master factors, fade stop, sound mass), 642-668 (Pause/Resume),
+  821-856 (timers: game tick, real time for SOF_NONGAME); SoundObject.h 14-25
+  (SOF_VOICE=0x40, SOF_WAITING=0x10000000, SOF_LOADED=0x40000000); SoundData.cpp
+  564-573 (emulation-type mapping 0-3, LC differs from beta).
+- **All 6 beta-binary checks PASS — no disagreement with LC** (read-only slices of
+  `scratch/beta-engine-disasm.txt`, saved as `scratch/lcx-beta-{commitplayingbuffer,
+  playbuffers,update}.txt`):
+  1. Pause path 0x82CEA-0x82D71: **no SetVolume(−10000)/SetFrequency(0)** — the sets
+     are skipped when bShouldPause (`jne 0x10082d5c` at 0x10082c9a); WAITING
+     (0x10082d64) + Stop (0x10082d71) only. The old 04 §4 "[mute path]" was wrong;
+     the log's −10000 comes from the 0.005 silence gate alone.
+  2. Silence gate on so+0x64 (post-budget) at 0x10082ad3 (const 0x101b95cc = 0.005);
+     10.0 s release (const 0x101b95c8 = 10.0, non-forced, 0x10082b53-0x10082b6e);
+     commit gate 0x10082b99-0x10082bbc; silent uncommitted entries → **no DS calls
+     at all** (0x10082bc9 `jl`); finish rule 0x10082d78-0x10082dcf (WAITING test
+     0x10082d8e, `elapsed > sd_tmLength` vs so_pCsdLink+0x30 double, Stop(1) at
+     0x10082da7, WAITING cleared at 0x10082dcf).
+  3. `SetCurrentPosition` at 0x10082BFB: **constant 0** argument; the
+     GetElapsedTime(0) result is discarded (`fstp %st(0)` at 0x10082bf2) — the beta's
+     recommit offset computation is dead, same as LC's shadowed local.
+  4. Update backstop 0x10087693-0x100876eb: `!paused && data && !decoder && !loop &&
+     tmPlaying > sd_tmLength + 1.0` (const 0x101b8cd0) → clear SOF_PLAYING.
+  5. snd_iMaxVoices default 30 (0x1020f80c; LC has 20); snd_iEmulationType: beta
+     0/1/2 with out-of-range remapped to 1 by a write-back at LoadWAV_t 0x1007f063,
+     `post:` SetFormat trigger (Init 0x10081b80); LC clamps 0-3 with NO_VIRTUALIZATION.
+  6. SetMode/QI block sits inside the bMono branch (0x1008269d `je 0x1008271f`) —
+     stereo duplicates never get SetMode.
+  En route (PE .data reads via inline Python): 0x101b95bc = 0.333, 0x101b95c4 = 3000.0,
+  0x101b95c8 = 10.0, 0x101b95cc = 0.005, 0x101b95c0 = −100.0, 0x101b8c68 = 0.5,
+  0x101b8cd0 = 1.0; steal polarity (delta ≥ 0.333 → steal) re-confirmed; master
+  factors at the Update head (mute → 0.0, attenuate && !SOF_VOICE → 0.5); DirectHF
+  `Set` unconditional when the FX cvar is 0 (0x10082def skips only the computation).
+  Analysis note: x86 PF is set for EVEN popcount — getting that backwards inverts the
+  polarity of every `jp`-based float compare (the 0.333 steal and 0.005 silence gates
+  both hinge on it).
+- **Design change D8 applied** (user decision 2026-10-16; reason recorded in 07 §14.5
+  before the 08 edit per the deviation rule): silent sounds are not committed —
+  pre-budget silence test (deliberate deviation from the beta's post-budget test —
+  budget-silenced sounds must stay committed or the software fallback defeats
+  `snd_iMaxSameSounds`; flagged to the user); not-held+silent → no commit, no voice
+  slot, no DS calls, `bBypass=false`; held+silent parked ≤ 10 s then
+  `ReleaseForRecommit` + `bBypass=false`; silent→audible → commit at the live offset;
+  silent entries never count toward `snd_iMaxVoices`; `DS3DShadow` gains
+  `tmSilentSince`. The beta's own finish backstop recorded as the rejected
+  alternative (07 §13 item 29).
+- **Corrections applied** (07 §14.3): beta recommits always restart at 0 (07 G4c/G4d,
+  99 #18, 04 §5 — our synced-offset release is an improvement, not parity); flag
+  renames 0x40=SOF_VOICE / 0x10000000=SOF_WAITING / 0x40000000=SOF_LOADED (01 §4,
+  02 §2, 03 §5, 04 §3); SetMode mono-only (00 §4.4, 04 §2/§3, 99 #7); pause-path
+  correction (04 §4, 99 #20, 08 §4 step 6); DirectHF cvar-off note (03 §5, 99 #13);
+  master-factor identification DAT_1022e9d8/d4 = _bMuteVolume/_bAttenuateVolume
+  (03 §1).
+- **Closed unknowns 99 §4 #1/#2**: volumetric blend formula (angle = ACos(dot) ×
+  bias, bias = min(3-ramp, 1); `_DAT_101b8ca8 = 0.0` was a Ghidra misread — 02 §3,
+  sheet row #5 → VERIFIED) and Fade() semantics (lerp to target; reaching 0 stops —
+  stays skipped on Steam).
+- Files touched: 07 (§13 items 21-29, §14, G4c/G4d), 08 (§0 D8 row, §4 steps 2/3/6 +
+  closing paragraph, §6 budget bullet, §8 struct, §10 parked row, §11 step 5), 99
+  (#5/#7/#13/#15/#17/#18/#20, §4 #1/#2, resolved list), 00 §4.4, 01 §4, 02 §2/§3,
+  03 §1/§5, 04 §2/§3/§4/§5/§7, WORKLOG.
+- Next: Task 3 step 1 — unchanged (cvars + empty shadow subsystem + all hooks
+  installed, mode off; verify vanilla behavior unchanged, 08 §11 step 1).
