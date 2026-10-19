@@ -1,0 +1,37 @@
+# Scratch / tool output — never commit
+scratch/
+_ghidra/
+ghidra-out/
+*.log
+dsoal*.txt
+alsoft*.log
+logstats*.json
+logstats*.txt
+
+# Binaries and game files
+*.dll
+*.exe
+*.lib
+*.pdb
+*.obj
+*.o
+*.a
+*.zip
+*.7z
+*.rar
+
+# Ghidra / IDE
+*.rep/
+*.gpr
+.vs/
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
