@@ -101,7 +101,7 @@ SuperProject/XGizmo code. Those stay in the private analysis workspace:
 
 This is my first reverse-engineering project, and AI tools played a central role throughout the investigation — assisting with disassembly analysis, interpreting engine behavior, comparing the beta and Steam builds, developing hypotheses, and exploring the implementation architecture.
 
-Because AI-assisted analysis can produce confident-sounding but incorrect conclusions, every claim in the findings is tagged by evidence strength (see *Confidence tags* below) and cited to specific disassembly addresses, source lines, or DSOAL log evidence. Early conclusions that were later overturned are marked inline (`[CORRECTED …]` / `[SUPERSEDED …]`) rather than silently edited. Some conclusions remain hypotheses, and the proposed implementation has not yet been validated in-game.
+Because AI-assisted analysis can produce confident-sounding but incorrect conclusions, every claim in the findings is tagged by evidence strength (see *Confidence tags* below) and cited to specific disassembly addresses, source lines, or DSOAL log evidence. Early conclusions that were later overturned are marked inline (`[CORRECTED …]` / `[SUPERSEDED …]`) rather than silently edited. The implementation has been runtime-tested against DSOAL logs (steps 1–6); coverage is limited to my setup (EAX, headphones, TSE 1.07 Steam).
 
 This repository is intended to document the investigation and provide a technical starting point for further verification, discussion, and implementation. Feedback and corrections from experienced reverse engineers and developers are very welcome.
 
