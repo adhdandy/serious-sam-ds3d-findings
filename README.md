@@ -4,8 +4,7 @@ Reverse-engineering notes and an implementation design for restoring the
 unreleased **TSE 1.50 beta's** per-sound **DirectSound3D** positional audio in
 the Steam builds of *Serious Sam Classic* (TSE), via runtime function
 patches in [SuperProject](https://github.com/SamClassicPatch) — without
-replacing the stock `Engine.dll`. 
-The implementation of the design can be found [here](https://github.com/adhdandy/SuperProject/tree/ds3d-spatial).
+replacing the stock `Engine.dll`.
 
 An opt-in cvar (`snd_bDS3DSpatial`, default off) implements a "shadow buffer"
 mode: each playing mono 3D sound gets its own DS3D buffer driven by the same
@@ -29,11 +28,11 @@ shadow reports a natural stop.
 - **Implementation:** lives in the
   [`adhdandy/SuperProject` `ds3d-spatial` branch](https://github.com/adhdandy/SuperProject/tree/ds3d-spatial);
   architecture documented in
-  [`findings/09-implementation.md`](findings/09-implementation.md); runtime
-  validation still pending.
-- **Pending runtime tests** (need a build): pause/resume mid-one-shot, DSOAL
-  behavior of a duplicate outliving its released template, `snd_iEmulationType`
-  toggle on running sounds, ear-pair unchanged check.
+  [`findings/09-implementation.md`](findings/09-implementation.md). Runtime-tested
+  against DSOAL logs (steps 1–6) on one setup (EAX, headphones, TSE 1.07 Steam).
+- **Remaining validation:** pause/resume mid-one-shot, DSOAL behavior of a
+  duplicate outliving its released template, `snd_iEmulationType` toggle on
+  running sounds, ear-pair unchanged check, and wider hardware/config coverage.
 
 ## Key results
 
