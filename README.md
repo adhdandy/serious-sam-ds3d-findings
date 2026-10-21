@@ -14,12 +14,23 @@ not also mixed in software. The DS shadow buffer owns playback state (the
 beta's model); the engine's `SOF_PLAY` bit is cleared by the mode when the
 shadow reports a natural stop.
 
+> **New here? Read [`findings/09-implementation.md`](findings/09-implementation.md) first.**
+> It is the high-level, no-background-needed explanation of how the mode is
+> implemented: the stock audio path, the shadow-buffer idea, what is hooked and
+> why, one frame in the DS3D mode, the lifecycle, threading, and configuration.
+> The files below are the detailed evidence behind it. The implementation code
+> itself lives in the
+> [`adhdandy/SuperProject` `ds3d-spatial` branch](https://github.com/adhdandy/SuperProject/tree/ds3d-spatial).
+
 ## Status
 
 - **Analysis:** complete (beta engine, Steam engine, patch framework).
 - **Design:** complete and reviewed (`findings/08-design.md`, `findings/07-implementation-notes.md`).
-- **Implementation:** not started. Nothing has been built or run in-game yet;
-  everything here is static analysis plus DSOAL log evidence.
+- **Implementation:** lives in the
+  [`adhdandy/SuperProject` `ds3d-spatial` branch](https://github.com/adhdandy/SuperProject/tree/ds3d-spatial);
+  architecture documented in
+  [`findings/09-implementation.md`](findings/09-implementation.md); runtime
+  validation still pending.
 - **Pending runtime tests** (need a build): pause/resume mid-one-shot, DSOAL
   behavior of a duplicate outliving its released template, `snd_iEmulationType`
   toggle on running sounds, ear-pair unchanged check.
@@ -61,10 +72,13 @@ shadow reports a natural stop.
 | [findings/06-core-patch-mechanism.md](findings/06-core-patch-mechanism.md) | SuperProject / XGizmo patch mechanism and existing sound patches |
 | [findings/07-implementation-notes.md](findings/07-implementation-notes.md) | Gap resolutions G1–G10, deviations, design amendments |
 | [findings/08-design.md](findings/08-design.md) | Module design: files, hooks, eligibility, gates, failure policy |
+| [findings/09-implementation.md](findings/09-implementation.md) | **Start here.** High-level architecture of the implemented mode: stock path, shadow buffers, hooks, frame flow, lifecycle, threading, cvars |
 | [findings/99-summary-and-open-questions.md](findings/99-summary-and-open-questions.md) | One-page parameter sheet, mapping table, open questions |
 | [findings/WORKLOG.md](findings/WORKLOG.md) | Running analysis log (what worked, dead ends) |
 
-If you only read two files: `99` (what the beta does) and `08` (what the patch will do).
+**Newcomers: start with `09`.** It explains the project end to end without assuming
+prior knowledge of the engine or the patch. Then read `99` (what the beta does) and
+`08` (the design of record) for the evidence and exact parameters.
 
 Some early statements were later corrected; corrections are marked inline
 (`[CORRECTED …]` / `[SUPERSEDED …]`), and `07` is authoritative where files disagree.
@@ -109,6 +123,10 @@ This repository is intended to document the investigation and provide a technica
 
 - [SamClassicPatch](https://github.com/SamClassicPatch) — "Serious Sam
   Classics Patch" (GPL-2.0); this design extends it.
+- [adhdandy/SuperProject, `ds3d-spatial` branch](https://github.com/adhdandy/SuperProject/tree/ds3d-spatial)
+  — the fork where the DS3D spatial mode is actually implemented
+  (`Core/Patches/SoundDS3D.*`, `Core/Patches/SoundLibrary.cpp`,
+  `Core/API/EnginePatches.cpp`).
 - [DSOAL](https://github.com/kcat/dsoal) — DirectSound → OpenAL Soft wrapper
   used to capture the call logs that document the beta's behavior.
 
