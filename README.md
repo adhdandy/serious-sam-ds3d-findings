@@ -30,7 +30,7 @@ shadow reports a natural stop.
   architecture documented in
   [`findings/09-implementation.md`](findings/09-implementation.md). Runtime-tested
   against DSOAL logs (steps 1–6) on one setup (EAX, headphones, TSE 1.07 Steam).
-- **Remaining validation:** pause/resume mid-one-shot, DSOAL behavior of a
+- **Remaining validation:** DSOAL behavior of a
   duplicate outliving its released template, `snd_iEmulationType` toggle on
   running sounds, ear-pair unchanged check, and wider hardware/config coverage.
 
